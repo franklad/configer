@@ -10,8 +10,7 @@ import (
 )
 
 // Configer defines an interface for accessing configuration values.
-// It provides type-safe methods for common data types, checks for key existence,
-// supports nested configurations via Sub, and allows retrieving all settings.
+// It provides type-safe methods for common data types, checks for key existence
 type Configer interface {
 	Bool(key string) bool
 	Int(key string) int
@@ -20,45 +19,40 @@ type Configer interface {
 	Float64(key string) float64
 	String(key string) string
 	Strings(key string) []string
-	StringMap(key string) map[string]interface{}
+	StringMap(key string) map[string]any
 	Duration(key string) time.Duration
 	Time(key string) time.Time
 	Exists(key string) bool
-	Sub(key string) Configer
-	AllSettings() map[string]interface{}
 }
 
-type viperConfiger struct {
-	v *viper.Viper
+type configer struct {
+	viper *viper.Viper
 }
 
 // config holds internal configuration options for building the Configer.
 type config struct {
-	configType          string
-	defaultConfigFile   string
-	envVarName          string
-	envConfigFilePrefix string
-	envConfigFileSuffix string
-	autoEnv             bool
-	envPrefix           string
-	bindEnvKeys         []string
-	viperConfig         func(*viper.Viper)
+	configFileType   string
+	configFilePrefix string
+	envVarName       string
+	autoEnv          bool
+	envPrefix        string
+	bindEnvKeys      []string
 }
 
 // option is a functional option for configuring the Configer.
 type option func(*config)
 
-// WithConfigType sets the configuration file type (e.g., "toml", "yaml").
-func WithConfigType(t string) option {
+// WithConfigFileType sets the configuration file type (e.g., "toml", "yaml").
+func WithConfigFileType(t string) option {
 	return func(c *config) {
-		c.configType = t
+		c.configFileType = t
 	}
 }
 
-// WithDefaultConfigFile sets the path to the default configuration file.
-func WithDefaultConfigFile(path string) option {
+// WithEnvConfigFilePrefix sets the prefix for environment-specific config files.
+func WithEnvConfigFilePrefix(prefix string) option {
 	return func(c *config) {
-		c.defaultConfigFile = path
+		c.configFilePrefix = prefix
 	}
 }
 
@@ -66,20 +60,6 @@ func WithDefaultConfigFile(path string) option {
 func WithEnvVarName(name string) option {
 	return func(c *config) {
 		c.envVarName = name
-	}
-}
-
-// WithEnvConfigFilePrefix sets the prefix for environment-specific config files.
-func WithEnvConfigFilePrefix(prefix string) option {
-	return func(c *config) {
-		c.envConfigFilePrefix = prefix
-	}
-}
-
-// WithEnvConfigFileSuffix sets the suffix for environment-specific config files (e.g., ".toml").
-func WithEnvConfigFileSuffix(suffix string) option {
-	return func(c *config) {
-		c.envConfigFileSuffix = suffix
 	}
 }
 
@@ -108,24 +88,14 @@ func WithBindEnv(keys ...string) option {
 	}
 }
 
-// WithCustomViper allows custom configuration of the underlying Viper instance.
-// This can be used for advanced features like adding more paths, binding flags, or setting up watching.
-func WithCustomViper(f func(*viper.Viper)) option {
-	return func(c *config) {
-		c.viperConfig = f
-	}
-}
-
 func defaults() *config {
 	return &config{
-		configType:          "toml",
-		defaultConfigFile:   "config/default.toml",
-		envVarName:          "ENV",
-		envConfigFilePrefix: "config/",
-		envConfigFileSuffix: ".toml",
-		autoEnv:             true,
-		envPrefix:           "",
-		bindEnvKeys:         []string{},
+		configFileType:   "toml",
+		configFilePrefix: "config/",
+		envVarName:       "ENV",
+		autoEnv:          true,
+		envPrefix:        "",
+		bindEnvKeys:      []string{},
 	}
 }
 
@@ -135,25 +105,21 @@ func defaults() *config {
 // Returns an error on failure instead of panicking.
 func New(opts ...option) (Configer, error) {
 	v := viper.New()
-	config := defaults()
 
+	config := defaults()
 	for _, opt := range opts {
 		opt(config)
 	}
 
-	if config.viperConfig != nil {
-		config.viperConfig(v)
-	}
-
-	v.SetConfigType(config.configType)
-	v.SetConfigFile(config.defaultConfigFile)
+	v.SetConfigType(config.configFileType)
+	v.SetConfigFile(config.configFilePrefix + "default." + config.configFileType)
 
 	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("failed to load default config file %s: %w", config.defaultConfigFile, err)
+		return nil, fmt.Errorf("failed to load default config file: %w", err)
 	}
 
 	if value, ok := os.LookupEnv(config.envVarName); ok {
-		envFile := config.envConfigFilePrefix + strings.ToLower(value) + config.envConfigFileSuffix
+		envFile := config.configFilePrefix + strings.ToLower(value) + "." + config.configFileType
 		v.SetConfigFile(envFile)
 		if err := v.MergeInConfig(); err != nil {
 			if _, notFound := err.(viper.ConfigFileNotFoundError); !notFound {
@@ -176,61 +142,49 @@ func New(opts ...option) (Configer, error) {
 		v.AutomaticEnv()
 	}
 
-	return &viperConfiger{v: v}, nil
+	return &configer{viper: v}, nil
 }
 
-func (c *viperConfiger) Bool(key string) bool {
-	return c.v.GetBool(key)
+func (c *configer) Bool(key string) bool {
+	return c.viper.GetBool(key)
 }
 
-func (c *viperConfiger) Int(key string) int {
-	return c.v.GetInt(key)
+func (c *configer) Int(key string) int {
+	return c.viper.GetInt(key)
 }
 
-func (c *viperConfiger) Int64(key string) int64 {
-	return c.v.GetInt64(key)
+func (c *configer) Int64(key string) int64 {
+	return c.viper.GetInt64(key)
 }
 
-func (c *viperConfiger) Uint(key string) uint {
-	return c.v.GetUint(key)
+func (c *configer) Uint(key string) uint {
+	return c.viper.GetUint(key)
 }
 
-func (c *viperConfiger) Float64(key string) float64 {
-	return c.v.GetFloat64(key)
+func (c *configer) Float64(key string) float64 {
+	return c.viper.GetFloat64(key)
 }
 
-func (c *viperConfiger) String(key string) string {
-	return c.v.GetString(key)
+func (c *configer) String(key string) string {
+	return c.viper.GetString(key)
 }
 
-func (c *viperConfiger) Strings(key string) []string {
-	return c.v.GetStringSlice(key)
+func (c *configer) Strings(key string) []string {
+	return c.viper.GetStringSlice(key)
 }
 
-func (c *viperConfiger) StringMap(key string) map[string]interface{} {
-	return c.v.GetStringMap(key)
+func (c *configer) StringMap(key string) map[string]interface{} {
+	return c.viper.GetStringMap(key)
 }
 
-func (c *viperConfiger) Duration(key string) time.Duration {
-	return c.v.GetDuration(key)
+func (c *configer) Duration(key string) time.Duration {
+	return c.viper.GetDuration(key)
 }
 
-func (c *viperConfiger) Time(key string) time.Time {
-	return c.v.GetTime(key)
+func (c *configer) Time(key string) time.Time {
+	return c.viper.GetTime(key)
 }
 
-func (c *viperConfiger) Exists(key string) bool {
-	return c.v.IsSet(key)
-}
-
-func (c *viperConfiger) Sub(key string) Configer {
-	sub := c.v.Sub(key)
-	if sub == nil {
-		return &viperConfiger{v: viper.New()}
-	}
-	return &viperConfiger{v: sub}
-}
-
-func (c *viperConfiger) AllSettings() map[string]interface{} {
-	return c.v.AllSettings()
+func (c *configer) Exists(key string) bool {
+	return c.viper.IsSet(key)
 }
